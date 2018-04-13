@@ -1,31 +1,23 @@
 <template>
     <div :class="prefixCls">
         <Tree-node
-            v-for="item in data"
-            :key="item.nodeKey"
+            v-for="(item, i) in stateTree"
+            :key="i"
             :data="item"
             visible
-            :fTocs="fToc"
-            :cTofs="cTof"
             :multiple="multiple"
             :show-checkbox="showCheckbox"
-            @on-select-node="onSelectNode"
-            @on-cancel-node="onCancelNode"
-            ref="node"
-            >
+            :children-key="childrenKey">
         </Tree-node>
-        <div :class="[prefixCls + '-empty']" v-if="!data.length">{{ localeEmptyText }}</div>
+        <div :class="[prefixCls + '-empty']" v-if="!stateTree.length">{{ localeEmptyText }}</div>
     </div>
 </template>
 <script>
     import TreeNode from './node.vue';
-    import { findComponentsDownward } from '../../utils/assist';
     import Emitter from '../../mixins/emitter';
     import Locale from '../../mixins/locale';
 
     const prefixCls = 'ivu-tree';
-
-    let key = 1;
 
     export default {
         name: 'Tree',
@@ -49,119 +41,145 @@
             emptyText: {
                 type: String
             },
-            fToc: {                   //添加属性，父节点到子节点联动控制
-                type: Boolean,
-                default: true
+            childrenKey: {
+                type: String,
+                default: 'children'
             },
-            cTof: {                    //添加属性，子节点到父节点联动控制
-                type: Boolean,
-                default: true
+            loadData: {
+                type: Function
+            },
+            render: {
+                type: Function
             }
         },
         data () {
             return {
-                prefixCls: prefixCls
+                prefixCls: prefixCls,
+                stateTree: this.data,
+                flatState: [],
             };
+        },
+        watch: {
+            data: {
+                deep: true,
+                handler () {
+                    this.stateTree = this.data;
+                    this.flatState = this.compileFlatState();
+                    this.rebuildTree();
+                }
+            }
         },
         computed: {
             localeEmptyText () {
-                if (this.emptyText === undefined) {
+                if (typeof this.emptyText === 'undefined') {
                     return this.t('i.tree.emptyText');
                 } else {
                     return this.emptyText;
                 }
-            }
+            },
         },
         methods: {
+            compileFlatState () { // so we have always a relation parent/children of each node
+                let keyCounter = 0;
+                let childrenKey = this.childrenKey;
+                const flatTree = [];
+                function flattenChildren(node, parent) {
+                    node.nodeKey = keyCounter++;
+                    flatTree[node.nodeKey] = { node: node, nodeKey: node.nodeKey };
+                    if (typeof parent != 'undefined') {
+                        flatTree[node.nodeKey].parent = parent.nodeKey;
+                        flatTree[parent.nodeKey][childrenKey].push(node.nodeKey);
+                    }
+
+                    if (node[childrenKey]) {
+                        flatTree[node.nodeKey][childrenKey] = [];
+                        node[childrenKey].forEach(child => flattenChildren(child, node));
+                    }
+                }
+                this.stateTree.forEach(rootNode => {
+                    flattenChildren(rootNode);
+                });
+                return flatTree;
+            },
+            updateTreeUp(nodeKey){
+                const parentKey = this.flatState[nodeKey].parent;
+                if (typeof parentKey == 'undefined') return;
+
+                const node = this.flatState[nodeKey].node;
+                const parent = this.flatState[parentKey].node;
+                if (node.checked == parent.checked && node.indeterminate == parent.indeterminate) return; // no need to update upwards
+
+                if (node.checked == true) {
+                    this.$set(parent, 'checked', parent[this.childrenKey].every(node => node.checked));
+                    this.$set(parent, 'indeterminate', !parent.checked);
+                } else {
+                    this.$set(parent, 'checked', false);
+                    this.$set(parent, 'indeterminate', parent[this.childrenKey].some(node => node.checked || node.indeterminate));
+                }
+                this.updateTreeUp(parentKey);
+            },
+            rebuildTree () { // only called when `data` prop changes
+                const checkedNodes = this.getCheckedNodes();
+                checkedNodes.forEach(node => {
+                    this.updateTreeDown(node, {checked: true});
+                    // propagate upwards
+                    const parentKey = this.flatState[node.nodeKey].parent;
+                    if (!parentKey && parentKey !== 0) return;
+                    const parent = this.flatState[parentKey].node;
+                    const childHasCheckSetter = typeof node.checked != 'undefined' && node.checked;
+                    if (childHasCheckSetter && parent.checked != node.checked) {
+                        this.updateTreeUp(node.nodeKey); // update tree upwards
+                    }
+                });
+            },
+
             getSelectedNodes () {
-                const nodes = findComponentsDownward(this, 'TreeNode');
-                return nodes.filter(node => node.data.selected).map(node => node.data);
+                /* public API */
+                return this.flatState.filter(obj => obj.node.selected).map(obj => obj.node);
             },
             getCheckedNodes () {
-                const nodes = findComponentsDownward(this, 'TreeNode');
-                return nodes.filter(node => node.data.checked).map(node => node.data);
+                /* public API */
+                return this.flatState.filter(obj => obj.node.checked).map(obj => obj.node);
             },
-            updateData (isInit = true) {
-                // init checked status
-                var self=this;
-                function reverseChecked(data) {
-                    if (!data.nodeKey) data.nodeKey = key++;
-                    if (data.children) {
-                        let checkedLength = 0;
-                        data.children.forEach(node => {
-                            if (node.children) node = reverseChecked(node);
-                            if (node.checked) checkedLength++;
-                        });
-                        if(self.cTof){
-                            if (isInit) {
-                                if (checkedLength >= data.children.length) data.checked = true;
-                            } else {
-                                data.checked = checkedLength >= data.children.length;
-                            }
-                        }else{
-//	                        data.checked = true;
-                        }
-                        return data;
-                    } else {
-                        return data;
-                    }
+            updateTreeDown(node, changes = {}) {
+                for (let key in changes) {
+                    this.$set(node, key, changes[key]);
                 }
-                function forwardChecked(data) {
-                    if (data.children) {
-                        if(self.fToc){
-                            data.children.forEach(node => {
-                                if (data.checked) node.checked = true;
-                                if (node.children) node = forwardChecked(node);
-                            });
-                        }else{
-                            data.children.forEach(node => {
-                                if (node.children) node = forwardChecked(node);
-                            });
-                        }
-                        return data;
-                    } else {
-                        return data;
-                    }
+                if (node[this.childrenKey]) {
+                    node[this.childrenKey].forEach(child => {
+                        this.updateTreeDown(child, changes);
+                    });
                 }
-                this.data.map(node => reverseChecked(node)).map(node => forwardChecked(node));
-                this.broadcast('TreeNode', 'indeterminate');
             },
-            onSelectNode(data) {
-                this.$emit('on-select-node', data);
+            handleSelect (nodeKey) {
+                const node = this.flatState[nodeKey].node;
+                if (!this.multiple){ // reset previously selected node
+                    const currentSelectedKey = this.flatState.findIndex(obj => obj.node.selected);
+                    if (currentSelectedKey >= 0 && currentSelectedKey !== nodeKey) this.$set(this.flatState[currentSelectedKey].node, 'selected', false);
+                }
+                this.$set(node, 'selected', !node.selected);
+
+                this.$emit('on-select-change', this.getSelectedNodes());
             },
-            onCancelNode(data) {
-                this.$emit('on-cancel-node', data);
+            handleCheck({ checked, nodeKey }) {
+                const node = this.flatState[nodeKey].node;
+                this.$set(node, 'checked', checked);
+                this.$set(node, 'indeterminate', false);
+
+                this.updateTreeUp(nodeKey); // propagate up
+                this.updateTreeDown(node, {checked, indeterminate: false}); // reset `indeterminate` when going down
+
+                this.$emit('on-check-change', this.getCheckedNodes());
             }
+        },
+        created(){
+            this.flatState = this.compileFlatState();
+            this.rebuildTree();
         },
         mounted () {
-            this.updateData();
-            this.$on('selected', ori => {
-                const nodes = findComponentsDownward(this, 'TreeNode');
-                nodes.forEach(node => {
-                    this.$set(node.data, 'selected', false);
-                });
-                this.$set(ori, 'selected', true);
-            });
-            this.$on('on-selected', () => {
-                this.$emit('on-select-change', this.getSelectedNodes());
-            });
-            this.$on('checked', () => {
-                this.updateData(false);
-            });
-            this.$on('on-checked', () => {
-                this.$emit('on-check-change', this.getCheckedNodes());
-            });
-            this.$on('toggle-expand', (payload) => {
-                this.$emit('on-toggle-expand', payload);
-            });
-        },
-        watch: {
-            data () {
-                this.$nextTick(() => {
-                    this.updateData();
-                    this.broadcast('TreeNode', 'indeterminate');
-                });
-            }
+            this.$on('on-check', this.handleCheck);
+            this.$on('on-selected', this.handleSelect);
+            this.$on('toggle-expand', node => this.$emit('on-toggle-expand', node));
         }
     };
 </script>

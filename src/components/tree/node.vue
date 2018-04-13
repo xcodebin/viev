@@ -1,34 +1,28 @@
 <template>
     <collapse-transition>
-        <ul :class="classes" v-show="visible">
-            <li @click="liStopPropagation">
+        <ul :class="classes">
+            <li>
                 <span :class="arrowClasses" @click="handleExpand">
-                    <Icon type="arrow-right-b"></Icon>
+                    <Icon v-if="showArrow" type="arrow-right-b"></Icon>
+                    <Icon v-if="showLoading" type="load-c" class="ivu-load-loop"></Icon>
                 </span>
                 <Checkbox
                         v-if="showCheckbox"
                         :value="data.checked"
-                        :indeterminate="indeterminate"
+                        :indeterminate="data.indeterminate"
                         :disabled="data.disabled || data.disableCheckbox"
                         @click.native.prevent="handleCheck"></Checkbox>
-                <img class="tree-img" :src="data.src" v-if="data.src"/>
-                <template v-if="data.tooltip">
-                    <Tooltip :content="data.tooltip" placement="right-start">
-                        <span :class="titleClasses" v-html="data.title" @click="handleSelect"></span>
-                    </Tooltip>
-                </template>
-                <template v-else>
-                    <span :class="titleClasses" v-html="data.title" @click="handleSelect"></span>
-                </template>
+                <Render v-if="data.render" :render="data.render" :data="data" :node="node"></Render>
+                <Render v-else-if="isParentRender" :render="parentRender" :data="data" :node="node"></Render>
+                <span v-else :class="titleClasses" @click="handleSelect">{{ data.title }}</span>
                 <Tree-node
-                        v-for="item in data.children"
-                        :key="item.nodeKey"
+                        v-if="data.expand"
+                        v-for="(item, i) in children"
+                        :key="i"
                         :data="item"
-                        :visible="data.expand"
                         :multiple="multiple"
-                        :fTocs="fTocs"
-                        :cTofs="cTofs"
-                        :show-checkbox="showCheckbox">
+                        :show-checkbox="showCheckbox"
+                        :children-key="childrenKey">
                 </Tree-node>
             </li>
         </ul>
@@ -37,16 +31,17 @@
 <script>
     import Checkbox from '../checkbox/checkbox.vue';
     import Icon from '../icon/icon.vue';
+    import Render from './render';
     import CollapseTransition from '../base/collapse-transition';
     import Emitter from '../../mixins/emitter';
-    import {findComponentsDownward} from '../../utils/assist';
+    import { findComponentUpward } from '../../utils/assist';
 
     const prefixCls = 'ivu-tree';
 
     export default {
         name: 'TreeNode',
-        mixins: [Emitter],
-        components: {Checkbox, Icon, CollapseTransition},
+        mixins: [ Emitter ],
+        components: { Checkbox, Icon, CollapseTransition, Render },
         props: {
             data: {
                 type: Object,
@@ -58,27 +53,18 @@
                 type: Boolean,
                 default: false
             },
+            childrenKey: {
+                type: String,
+                default: 'children'
+            },
             showCheckbox: {
                 type: Boolean,
                 default: false
-            },
-            visible: {
-                type: Boolean,
-                default: false
-            },
-            fTocs: {
-                type: Boolean,
-                default: true
-            },
-            cTofs: {
-                type: Boolean,
-                default: true
             }
         },
         data () {
             return {
-                prefixCls: prefixCls,
-                indeterminate: false
+                prefixCls: prefixCls
             };
         },
         computed: {
@@ -99,8 +85,7 @@
                     `${prefixCls}-arrow`,
                     {
                         [`${prefixCls}-arrow-disabled`]: this.data.disabled,
-                        [`${prefixCls}-arrow-open`]: this.data.expand,
-                        [`${prefixCls}-arrow-hidden`]: !(this.data.children && this.data.children.length)
+                        [`${prefixCls}-arrow-open`]: this.data.expand
                     }
                 ];
             },
@@ -111,90 +96,76 @@
                         [`${prefixCls}-title-selected`]: this.data.selected
                     }
                 ];
+            },
+            showArrow () {
+                return (this.data[this.childrenKey] && this.data[this.childrenKey].length) || ('loading' in this.data && !this.data.loading);
+            },
+            showLoading () {
+                return 'loading' in this.data && this.data.loading;
+            },
+            isParentRender () {
+                const Tree = findComponentUpward(this, 'Tree');
+                return Tree && Tree.render;
+            },
+            parentRender () {
+                const Tree = findComponentUpward(this, 'Tree');
+                if (Tree && Tree.render) {
+                    return Tree.render;
+                } else {
+                    return null;
+                }
+            },
+            node () {
+                const Tree = findComponentUpward(this, 'Tree');
+                if (Tree) {
+                    // 将所有的 node（即flatState）和当前 node 都传递
+                    return [Tree.flatState, Tree.flatState.find(item => item.nodeKey === this.data.nodeKey)];
+                } else {
+                    return [];
+                }
+            },
+            children () {
+                return this.data[this.childrenKey];
             }
         },
         methods: {
-            liStopPropagation (e) {
-                e.stopPropagation();
+            handleExpand () {
+                const item = this.data;
+                if (item.disabled) return;
+
+                // async loading
+                if (item[this.childrenKey].length === 0) {
+                    const tree = findComponentUpward(this, 'Tree');
+                    if (tree && tree.loadData) {
+                        this.$set(this.data, 'loading', true);
+                        tree.loadData(item, children => {
+                            this.$set(this.data, 'loading', false);
+                            if (children.length) {
+                                this.$set(this.data, this.childrenKey, children);
+                                this.$nextTick(() => this.handleExpand());
+                            }
+                        });
+                        return;
+                    }
+                }
+
+                if (item[this.childrenKey] && item[this.childrenKey].length) {
+                    this.$set(this.data, 'expand', !this.data.expand);
+                    this.dispatch('Tree', 'toggle-expand', this.data);
+                }
             },
-            handleExpand (e) {
-                e.stopPropagation();
+            handleSelect () {
                 if (this.data.disabled) return;
-                this.$set(this.data, 'expand', !this.data.expand);
-                this.dispatch('Tree', 'toggle-expand', this.data);
+                this.dispatch('Tree', 'on-selected', this.data.nodeKey);
             },
-            handleSelect (e) {
-                e.stopPropagation();
+            handleCheck () {
                 if (this.data.disabled) return;
-                if (this.data.selected) {
-                    this.data.selected = false;
-                } else if (this.multiple) {
-                    this.$set(this.data, 'selected', !this.data.selected);
-                } else {
-                    this.dispatch('Tree', 'selected', this.data);
-                }
-                this.dispatch('Tree', 'on-selected');
-//                if (this.showCheckbox) { //多选的时候 后期需要不联动效果时可开启
-                this.handleCheck(e);
-//                }
-            },
-            handleCheck (e) {
-                if (e) e.stopPropagation();
-                if (this.disabled) return;
-                const checked = !this.data.checked;
-                if (!checked || this.indeterminate) {
-                    if (this.fTocs) {
-                        findComponentsDownward(this, 'TreeNode').forEach(node => node.data.checked = false);
-                    }
-                } else {
-                    if (this.fTocs) {
-                        findComponentsDownward(this, 'TreeNode').forEach(node => node.data.checked = true);
-                    }
-                }
-                this.data.checked = checked;
-                this.dispatch('Tree', 'checked');
-                this.dispatch('Tree', 'on-checked');
-                if (this.showCheckbox == false) { //单选的时候
-                    if (this.data.selected == false) {
-                        //选中数据
-                        this.dispatch('Tree', 'on-cancel-node', this.data);
-                    } else {
-                        //取消选择
-                        this.dispatch('Tree', 'on-select-node', this.data);
-                    }
-                } else {
-                    if (this.data.checked == false) {
-                        //选中数据
-                        this.dispatch('Tree', 'on-cancel-node', this.data);
-                    } else {
-                        //取消选择
-                        this.dispatch('Tree', 'on-select-node', this.data);
-                    }
-                }
-            },
-            setIndeterminate () {
-                this.indeterminate = this.data.checked ? false : findComponentsDownward(this, 'TreeNode').some(node => node.data.checked);
-                if(!this.fTocs && !this.cTofs) {
-                    this.indeterminate = false;
-                }
+                const changes = {
+                    checked: !this.data.checked && !this.data.indeterminate,
+                    nodeKey: this.data.nodeKey
+                };
+                this.dispatch('Tree', 'on-check', changes);
             }
-        },
-        created () {
-            // created node.vue first, mounted tree.vue second
-            if (!this.data.checked) this.$set(this.data, 'checked', false);
-        },
-        mounted () {
-            this.$on('indeterminate', () => {
-                this.broadcast('TreeNode', 'indeterminate');
-                this.setIndeterminate();
-            });
         }
     };
 </script>
-<style>
-    .tree-img {
-        width: 18px;
-        height: 18px;
-        vertical-align: middle
-    }
-</style>

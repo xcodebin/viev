@@ -1,9 +1,9 @@
 {
-  "name": "iviews",
-  "version": "2.0.0-rc.3",
-  "title": "iView",
+  "name": "xview",
+  "version": "1.0.0-rc.01",
+  "title": "xView",
   "description": "A high quality  UI components Library with Vue.js",
-  "main": "dist/iview.js",
+  "main": "dist/xview.js",
   "files": [
     "dist",
     "src"
@@ -22,7 +22,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/xcodebin/iview0614-scrollbar.git"
+    "url": "git+https://github.com/xcodebin/xview.git"
   },
   "keywords": [
     "xubin865453422"
@@ -30,9 +30,9 @@
   "author": "xcodebin",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/xcodebin/iview0614-scrollbar/issues"
+    "url": "https://github.com/xcodebin/xview/issues"
   },
-  "homepage": "https://github.com/xcodebin/iview0614-scrollbar#readme",
+  "homepage": "https://github.com/xcodebin/xview#readme",
   "dependencies": {
     "async-validator": "^1.8.2",
     "deepmerge": "^2.1.0",

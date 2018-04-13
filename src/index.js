@@ -126,7 +126,7 @@ const components = {
     Upload
 };
 
-const iview = {
+const xview = {
     ...components,
     iButton: Button,
     iCircle: Circle,
@@ -149,8 +149,8 @@ const install = function(Vue, opts = {}) {
     locale.use(opts.locale);
     locale.i18n(opts.i18n);
 
-    Object.keys(iview).forEach(key => {
-        Vue.component(key, iview[key]);
+    Object.keys(xview).forEach(key => {
+        Vue.component(key, xview[key]);
     });
 
     Vue.prototype.$Loading = LoadingBar;
@@ -165,4 +165,4 @@ if (typeof window !== 'undefined' && window.Vue) {
     install(window.Vue);
 }
 
-module.exports = Object.assign(iview, {install});   // eslint-disable-line no-undef
+module.exports = Object.assign(xview, {install});   // eslint-disable-line no-undef

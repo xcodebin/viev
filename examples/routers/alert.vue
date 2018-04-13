@@ -32,7 +32,7 @@
     </div>
 </template>
 <script>
-    import { Alert, Icon } from 'iview';
+    import { Alert, Icon } from 'xview';
     export default {
         components: { Alert, Icon }
     }
